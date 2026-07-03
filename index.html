@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: Arial, sans-serif; background: #fff; }
+    #report { width: 100%; padding: 10px; }
+    .report-header { text-align: center; margin-bottom: 12px; }
+    .report-header h1 { font-size: 18px; font-weight: bold; color: #000; margin: 0 0 2px 0; }
+    .report-date { font-size: 11px; color: #666; font-style: italic; margin: 0; }
+    .date-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; }
+    .date-controls label { font-size: 13px; color: #374151; font-weight: 600; }
+    .date-controls select { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; color: #374151; background: #fff; cursor: pointer; }
+    .date-range-inputs { display: flex; align-items: center; gap: 6px; }
+    .date-range-inputs input[type="date"] { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+    .date-range-inputs span { font-size: 13px; color: #6b7280; }
+    .apply-btn { padding: 6px 16px; background: #16a34a; color: #fff; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .apply-btn:hover { background: #15803d; }
+    .table-responsive { overflow-x: auto; border: 1px solid #d1d5db; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th { background: #34A853; color: #fff; font-weight: bold; font-size: 13px; padding: 7px 10px; border: 1px solid #2d9147; text-align: center; }
+    td { padding: 6px 10px; border: 1px solid #e5e7eb; font-size: 13px; color: #000; text-align: center; white-space: nowrap; }
+    tr:nth-child(even) td { background: #f0fdf4; }
+    .loading { color: #9ca3af; padding: 20px; text-align: center; }
+    .error { color: #ef4444; padding: 20px; text-align: center; }
+    .cold { color: #6b7280; }
+    .won-note { font-size: 11px; color: #6b7280; font-style: italic; margin-top: 6px; text-align: right; }
+  </style>
+</head>
+<body>
+  <div id="report">
+    <div class="report-header">
+      <h1>Google Ads Performance</h1>
+      <p class="report-date" id="date-label">Live Dashboard View</p>
+    </div>
+    <div class="date-controls">
+      <label>Select date range</label>
+      <select id="preset-select" onchange="handlePresetChange()">
+        <option value="last7">Last 7 days</option>
+        <option value="last30" selected>Last 30 days</option>
+        <option value="last60">Last 60 days</option>
+        <option value="last90">Last 90 days</option>
+        <option value="mtd">Month to date</option>
+        <option value="ytd">Year to date</option>
+        <option value="custom">Custom range</option>
+      </select>
+      <div class="date-range-inputs" id="custom-range" style="display:none;">
+        <span>From</span>
+        <input type="date" id="start-date">
+        <span>To</span>
+        <input type="date" id="end-date">
+      </div>
+      <button class="apply-btn" onclick="applyDateRange()">Apply</button>
+    </div>
+    <div class="table-responsive">
+      <table>
+        <thead>
+          <tr>
+            <th>Campaign</th>
+            <th>Ad Group</th>
+            <th>Conversions</th>
+            <th>Total Spend</th>
+            <th>Cost/Conv</th>
+            <th>Won</th>
+            <th>Value</th>
+            <th>ROAS</th>
+            <th>Cold Leads</th>
+          </tr>
+        </thead>
+        <tbody id="report-body">
+          <tr><td colspan="9" class="loading">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="won-note">Won / Value / Cold Leads reflect leads acquired within the selected date range.</p>
+  </div>
+
+  <script>
+    const PROXY_URL = "https://gads-proxy-dal.apfelipe94.workers.dev/";
+
+    let perfData    = [];
+    let contactData = [];
+    let loaded      = 0;
+
+    function fmt(d) { return d.toISOString().split("T")[0]; }
+
+    function getDates(preset) {
+      const end   = new Date();
+      const start = new Date();
+      if (preset === "last7")  start.setDate(end.getDate() - 7);
+      if (preset === "last30") start.setDate(end.getDate() - 30);
+      if (preset === "last60") start.setDate(end.getDate() - 60);
+      if (preset === "last90") start.setDate(end.getDate() - 90);
+      if (preset === "mtd")    start.setDate(1);
+      if (preset === "ytd")  { start.setMonth(0); start.setDate(1); }
+      return { start: fmt(start), end: fmt(end) };
+    }
+
+    function handlePresetChange() {
+      const preset = document.getElementById("preset-select").value;
+      const cr = document.getElementById("custom-range");
+      if (preset === "custom") {
+        cr.style.display = "flex";
+        document.getElementById("start-date").value = fmt(new Date(Date.now() - 30*24*60*60*1000));
+        document.getElementById("end-date").value   = fmt(new Date());
+      } else {
+        cr.style.display = "none";
+      }
+    }
+
+    function applyDateRange() {
+      const preset = document.getElementById("preset-select").value;
+      let startDate, endDate;
+      if (preset === "custom") {
+        startDate = document.getElementById("start-date").value;
+        endDate   = document.getElementById("end-date").value;
+        if (!startDate || !endDate) { alert("Please select both dates."); return; }
+      } else {
+        const d = getDates(preset);
+        startDate = d.start; endDate = d.end;
+      }
+      document.getElementById("date-label").textContent = `${startDate} → ${endDate}`;
+      renderTable(startDate, endDate);
+    }
+
+    function renderTable(startDate, endDate) {
+      const tbody = document.getElementById("report-body");
+
+      // 1. Aggregate daily spend/conversions by campaign+adGroup
+      const perfMap = {};
+      perfData
+        .filter(r => r.date >= startDate && r.date <= endDate)
+        .forEach(r => {
+          const key = `${r.campaign}||${r.adGroup}`;
+          if (!perfMap[key]) perfMap[key] = { campaign: r.campaign, adGroup: r.adGroup,
+            cost: 0, conversions: 0, clicks: 0 };
+          perfMap[key].cost        += parseFloat(r.cost)        || 0;
+          perfMap[key].conversions += parseFloat(r.conversions) || 0;
+          perfMap[key].clicks      += parseFloat(r.clicks)      || 0;
+        });
+
+      // 2. Aggregate Won/Value/Cold from contacts acquired within date range
+      const wonMap = {};
+      contactData
+        .filter(r => r.date >= startDate && r.date <= endDate)
+        .forEach(r => {
+          const key = `${r.campaign}||${r.adGroup}`;
+          if (!wonMap[key]) wonMap[key] = { won: 0, wonValue: 0, cold: 0 };
+          wonMap[key].won      += parseFloat(r.won)      || 0;
+          wonMap[key].wonValue += parseFloat(r.wonValue) || 0;
+          wonMap[key].cold     += parseFloat(r.cold)     || 0;
+        });
+
+      // 3. Merge and render
+      const allKeys = new Set([...Object.keys(perfMap), ...Object.keys(wonMap)]);
+
+      if (allKeys.size === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No data for selected period.</td></tr>';
+        return;
+      }
+
+      const rows = Array.from(allKeys).map(key => {
+        const p = perfMap[key] || { campaign: key.split("||")[0], adGroup: key.split("||")[1], cost: 0, conversions: 0, clicks: 0 };
+        const w = wonMap[key]  || { won: 0, wonValue: 0, cold: 0 };
+        return {
+          campaign:    p.campaign,
+          adGroup:     p.adGroup,
+          conversions: p.conversions,
+          cost:        p.cost,
+          costConv:    p.conversions > 0 ? p.cost / p.conversions : 0,
+          won:         w.won,
+          wonValue:    w.wonValue,
+          roas:        p.cost > 0 ? w.wonValue / p.cost : 0,
+          cold:        w.cold
+        };
+      })
+      .filter(r => r.conversions > 0 || r.won > 0 || r.cold > 0)
+      .sort((a, b) => b.cost - a.cost);
+
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No active ads for selected period.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.campaign}</td>
+          <td>${r.adGroup}</td>
+          <td>${r.conversions.toFixed(1)}</td>
+          <td>$${r.cost.toFixed(2)}</td>
+          <td>${r.costConv > 0 ? "$" + r.costConv.toFixed(2) : "—"}</td>
+          <td>${r.won}</td>
+          <td>$${r.wonValue.toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+          <td>${r.roas > 0 ? r.roas.toFixed(2) : "—"}</td>
+          <td class="cold">${r.cold > 0 ? r.cold : "—"}</td>
+        </tr>
+      `).join("");
+    }
+
+    function onDataLoaded() {
+      loaded++;
+      if (loaded === 2) applyDateRange();
+    }
+
+    fetch(`${PROXY_URL}/?endpoint=perf`)
+      .then(res => res.json())
+      .then(json => { perfData = json.data || []; onDataLoaded(); })
+      .catch(() => {
+        document.getElementById("report-body").innerHTML =
+          '<tr><td colspan="9" class="error">Failed to load performance data.</td></tr>';
+      });
+
+    fetch(`${PROXY_URL}/?endpoint=contacts`)
+      .then(res => res.json())
+      .then(json => { contactData = json.data || []; onDataLoaded(); })
+      .catch(() => {
+        document.getElementById("report-body").innerHTML =
+          '<tr><td colspan="9" class="error">Failed to load contact data.</td></tr>';
+      });
+  </script>
+</body>
+</html>
